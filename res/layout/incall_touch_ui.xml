@@ -85,8 +85,8 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:background="@drawable/dialpad_background"
-                android:paddingLeft="@dimen/button_cluster_side_padding"
-                android:paddingRight="@dimen/button_cluster_side_padding"
+                android:paddingStart="@dimen/button_cluster_side_padding"
+                android:paddingEnd="@dimen/button_cluster_side_padding"
                 >
 
                 <!-- This row has either 4 or 5 buttons, depending on
@@ -195,11 +195,8 @@
 
                 <!-- Separator between 5th (or 6th) button and right padding -->
                 <View style="@style/VerticalSeparator" />
-
             </LinearLayout>
-
         </LinearLayout>
-
     </RelativeLayout>
 
     <!--
@@ -211,6 +208,10 @@
               a bit of the bottom of the contact photo
             - The verticalOffset value gets us a little extra space above
               the topmost "Respond by SMS" icon
+            - The negative layout_marginBottom shifts us slightly downward;
+              we're already aligned with the bottom of the screen, but we
+              don't have an icon in the downward direction so the whole
+              bottom area of this widget is just wasted space.
     -->
     <FrameLayout
         android:id="@+id/incomingCallWidgetFrameLayout"
@@ -223,14 +224,13 @@
 
     <com.android.internal.widget.multiwaveview.GlowPadView
         android:id="@+id/incomingCallWidget"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:orientation="horizontal"
-        android:layout_marginTop="20dp"
-        android:layout_marginBottom="0dp"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:layout_gravity="center|bottom"
+        android:layout_marginTop="20dip"
+        android:layout_marginBottom="0dip"
         android:visibility="gone"
-        android:layout_gravity="center_horizontal"
-        android:gravity="top"
+        android:gravity="left|top"
 
         prvandroid:targetDrawables="@array/incoming_call_widget_3way_targets"
         prvandroid:targetDescriptions="@array/incoming_call_widget_3way_target_descriptions"
@@ -245,6 +245,5 @@
         prvandroid:glowRadius="@*android:dimen/glowpadview_glow_radius"
         prvandroid:pointDrawable="@*android:drawable/ic_lockscreen_glowdot"
         />
-    </FrameLayout>
-
+        </FrameLayout>
 </com.android.phone.InCallTouchUi>

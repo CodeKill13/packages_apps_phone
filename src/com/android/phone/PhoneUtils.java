@@ -38,6 +38,7 @@ import android.os.Handler;
 import android.os.Message;
 import android.os.RemoteException;
 import android.os.SystemProperties;
+import android.preference.PreferenceManager;
 import android.provider.Settings;
 import android.telephony.PhoneNumberUtils;
 import android.text.TextUtils;
@@ -62,6 +63,12 @@ import com.android.internal.telephony.TelephonyCapabilities;
 import com.android.internal.telephony.TelephonyProperties;
 import com.android.internal.telephony.cdma.CdmaConnection;
 import com.android.internal.telephony.sip.SipPhone;
+
+import java.io.File;
+import java.io.FileNotFoundException;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.io.SyncFailedException;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -97,6 +104,10 @@ public class PhoneUtils {
     static final int AUDIO_IDLE = 0;  /** audio behaviour at phone idle */
     static final int AUDIO_RINGING = 1;  /** audio behaviour while ringing */
     static final int AUDIO_OFFHOOK = 2;  /** audio behaviour while in call. */
+
+    // USSD string length for MMI operations
+    static final int MIN_USSD_LEN = 1;
+    static final int MAX_USSD_LEN = 160;
 
     /** Speaker state, persisting between wired headset connection events */
     private static boolean sIsSpeakerEnabled = false;
@@ -392,7 +403,7 @@ public class PhoneUtils {
     }
 
     static class PhoneSettings {
-
+        /* vibration preferences */
         static boolean vibOn60Secs(Context context) {
             return getPrefs(context).getBoolean("button_vibrate_60", false);
         }
@@ -408,6 +419,8 @@ public class PhoneUtils {
         static boolean vibCallWaiting(Context context) {
             return getPrefs(context).getBoolean("button_vibrate_call_waiting", false);
         }
+
+        /* misc. UI and behaviour preferences */
         static boolean showInCallEvents(Context context) {
             return getPrefs(context).getBoolean("button_show_ssn_key", false);
         }
@@ -424,28 +437,39 @@ public class PhoneUtils {
         static boolean transparentInCallWidget(Context context) {
             return getPrefs(context).getBoolean("transparent_in_call_widget", false);
         }
-        static boolean isBlacklistEnabled(Context context) {
-            return Settings.System.getInt(context.getContentResolver(),
-                    Settings.System.PHONE_BLACKLIST_ENABLED, 1) != 0;
-        }
-        static boolean isBlacklistNotifyEnabled(Context context) {
-            return getPrefs(context).getBoolean("button_notify", true);
-        }
-        static boolean isBlacklistPrivateNumberEnabled(Context context) {
-            return getPrefs(context).getBoolean("button_blacklist_private_numbers", false);
-        }
-        static boolean isBlacklistUnknownNumberEnabled(Context context) {
-            return getPrefs(context).getBoolean("button_blacklist_unknown_numbers", false);
-        }
-        static boolean isBlacklistRegexEnabled(Context context) {
-            return getPrefs(context).getBoolean("button_blacklist_regex", false);
-        }
         static boolean isDirectCallBackEnabled(Context context) {
             return getPrefs(context).getBoolean("button_callback", false);
         }
         static boolean markRejectedCallsAsMissed(Context context) {
             return getPrefs(context).getBoolean("button_rejected_as_missed", false);
         }
+
+        /* voice quality preferences */
+        static String getVoiceQualityParameter(Context context) {
+            String param = context.getResources().getString(R.string.voice_quality_param);
+            if (TextUtils.isEmpty(param)) {
+                return null;
+            }
+            String value = getVoiceQualityValue(context);
+            if (value == null) {
+                return null;
+            }
+            return param + "=" + value;
+        }
+        static String getVoiceQualityValue(Context context) {
+            String value = getPrefs(context).getString(
+                    CallFeaturesSetting.BUTTON_VOICE_QUALITY_KEY, null);
+            if (value != null) {
+                return value;
+            }
+            /* use first value of entry list */
+            String[] values = context.getResources().getStringArray(R.array.voice_quality_values);
+            if (values.length > 0) {
+                return values[0];
+            }
+            return null;
+        }
+
         private static SharedPreferences getPrefs(Context context) {
             return PreferenceManager.getDefaultSharedPreferences(context);
         }
@@ -538,13 +562,17 @@ public class PhoneUtils {
      */
     static boolean hangup(Call call) {
         try {
-            CallManager cm = PhoneGlobals.getInstance().mCM;
+            PhoneGlobals app = PhoneGlobals.getInstance();
+            CallManager cm = app.mCM;
 
             if (call.getState() == Call.State.ACTIVE && cm.hasActiveBgCall()) {
                 // handle foreground call hangup while there is background call
                 log("- hangup(Call): hangupForegroundResumeBackground...");
                 cm.hangupForegroundResumeBackground(cm.getFirstActiveBgCall());
             } else {
+                // write the phone apps status to proximity sysfs node
+                writePhoneAppStatus(app.getApplicationContext(), false);
+
                 log("- hangup(Call): regular hangup()...");
                 call.hangup();
             }
@@ -812,7 +840,7 @@ public class PhoneUtils {
         return status;
     }
 
-    private static String toLogSafePhoneNumber(String number) {
+    /* package */ static String toLogSafePhoneNumber(String number) {
         // For unknown number, log empty string.
         if (number == null) {
             return "";
@@ -1171,7 +1199,21 @@ public class PhoneUtils {
                         public void onClick(DialogInterface dialog, int whichButton) {
                             switch (whichButton) {
                                 case DialogInterface.BUTTON_POSITIVE:
-                                    phone.sendUssdResponse(inputText.getText().toString());
+                                    // As per spec 24.080, valid length of ussd string
+                                    // is 1 - 160. If length is out of the range then
+                                    // display toast message & Cancel MMI operation.
+                                    if (inputText.length() < MIN_USSD_LEN
+                                            || inputText.length() > MAX_USSD_LEN) {
+                                        Toast.makeText(app,
+                                                app.getResources().getString(R.string.enter_input,
+                                                MIN_USSD_LEN, MAX_USSD_LEN),
+                                                Toast.LENGTH_LONG).show();
+                                        if (mmiCode.isCancelable()) {
+                                            mmiCode.cancel();
+                                        }
+                                    } else {
+                                        phone.sendUssdResponse(inputText.getText().toString());
+                                    }
                                     break;
                                 case DialogInterface.BUTTON_NEGATIVE:
                                     if (mmiCode.isCancelable()) {
@@ -1934,16 +1976,17 @@ public class PhoneUtils {
     }
 
     static void turnOnNoiseSuppression(Context context, boolean flag) {
-        if (DBG) log("turnOnNoiseSuppression: " + flag);
         AudioManager audioManager = (AudioManager) context.getSystemService(Context.AUDIO_SERVICE);
 
         if (!context.getResources().getBoolean(R.bool.has_in_call_noise_suppression)) {
             return;
         }
 
+        if (DBG) log("turnOnNoiseSuppression: " + flag);
+
         int nsp = android.provider.Settings.System.getInt(context.getContentResolver(),
-                                                          android.provider.Settings.System.NOISE_SUPPRESSION,
-                                                          1);
+                                                              android.provider.Settings.System.NOISE_SUPPRESSION,
+                                                              1);
 
         String aParam = context.getResources().getString(R.string.in_call_noise_suppression_audioparameter);
         String[] aPValues = aParam.split("=");
@@ -1966,6 +2009,28 @@ public class PhoneUtils {
         } else {
             if (DBG) log("turnOnNoiseSuppression: " + aPValues[0] + "=" + aPValues[2]);
             audioManager.setParameters(aPValues[0] + "=" + aPValues[2]);
+        }
+    }
+
+    static void writePhoneAppStatus(Context context, boolean flag) {
+        String statusFile = context.getResources().getString(R.string.phone_app_status_file);
+
+        if (statusFile.length() >= 1) {
+            log("writePhoneAppStatus: " + flag);
+
+            String[] statusValues = context.getResources().getStringArray(R.array.phone_app_status_values);
+
+            if (flag) {
+                if (statusValues[0].length() >= 1) {
+                    writeValue(statusFile, statusValues[0]);
+                }
+            } else {
+                if (statusValues[1].length() >= 1) {
+                    writeValue(statusFile, statusValues[1]);
+                }
+            }
+        } else {
+            return;
         }
     }
 
@@ -2617,31 +2682,6 @@ public class PhoneUtils {
         return sVoipSupported;
     }
 
-    /**
-     * On GSM devices, we never use short tones.
-     * On CDMA devices, it depends upon the settings.
-     */
-    public static boolean useShortDtmfTones(Phone phone, Context context) {
-        int phoneType = phone.getPhoneType();
-        if (phoneType == PhoneConstants.PHONE_TYPE_GSM) {
-            return false;
-        } else if (phoneType == PhoneConstants.PHONE_TYPE_CDMA) {
-            int toneType = android.provider.Settings.System.getInt(
-                    context.getContentResolver(),
-                    Settings.System.DTMF_TONE_TYPE_WHEN_DIALING,
-                    CallFeaturesSetting.DTMF_TONE_TYPE_NORMAL);
-            if (toneType == CallFeaturesSetting.DTMF_TONE_TYPE_NORMAL) {
-                return true;
-            } else {
-                return false;
-            }
-        } else if (phoneType == PhoneConstants.PHONE_TYPE_SIP) {
-            return false;
-        } else {
-            throw new IllegalStateException("Unexpected phone type: " + phoneType);
-        }
-    }
-
     public static String getPresentationString(Context context, int presentation) {
         String name = context.getString(R.string.unknown);
         if (presentation == PhoneConstants.PRESENTATION_RESTRICTED) {
@@ -2801,5 +2841,39 @@ public class PhoneUtils {
     public static boolean isLandscape(Context context) {
         return context.getResources().getConfiguration().orientation
                 == Configuration.ORIENTATION_LANDSCAPE;
+    }
+
+    /**
+     * Write a string value to the specified file.
+     *
+     * @param filename The filename
+     * @param value The value
+     */
+    public static void writeValue(String filename, String value) {
+        FileOutputStream fos = null;
+        try {
+            fos = new FileOutputStream(new File(filename), false);
+            fos.write(value.getBytes());
+            fos.flush();
+        } catch (FileNotFoundException ex) {
+            Log.w(LOG_TAG, "file " + filename + " not found: " + ex);
+        } catch (SyncFailedException ex) {
+            Log.w(LOG_TAG, "file " + filename + " sync failed: " + ex);
+        } catch (IOException ex) {
+            Log.w(LOG_TAG, "IOException trying to sync " + filename + ": " + ex);
+        } catch (RuntimeException ex) {
+            Log.w(LOG_TAG, "exception while syncing file: ", ex);
+        } finally {
+            if (fos != null) {
+                try {
+                    Log.w(LOG_TAG, "file " + filename + ": " + value);
+                    fos.close();
+                } catch (IOException ex) {
+                    Log.w(LOG_TAG, "IOException while closing synced file: ", ex);
+                } catch (RuntimeException ex) {
+                    Log.w(LOG_TAG, "exception while closing file: ", ex);
+                }
+            }
+        }
     }
 }
