@@ -46,10 +46,8 @@ import android.widget.Toast;
 
 import com.android.internal.telephony.Call;
 import com.android.internal.telephony.CallManager;
-import com.android.internal.telephony.Connection;
 import com.android.internal.telephony.Phone;
 import com.android.internal.telephony.PhoneConstants;
-import com.android.internal.telephony.util.BlacklistUtils;
 import com.android.internal.widget.multiwaveview.GlowPadView;
 import com.android.internal.widget.multiwaveview.GlowPadView.OnTriggerListener;
 import com.android.phone.InCallUiState.InCallScreenMode;
@@ -67,10 +65,9 @@ public class InCallTouchUi extends FrameLayout
     private static final boolean DBG = (PhoneGlobals.DBG_LEVEL >= 2);
 
     // Incoming call widget targets
-    private static final int ANSWER_CALL_ID = 0;         // drag right
-    private static final int SEND_SMS_ID = 1;            // drag up
-    private static final int DECLINE_CALL_ID = 2;        // drag left
-    private static final int DECLINE_CALL_CALLBACK = 3;  // drag down
+    private static final int ANSWER_CALL_ID = 0;  // drag right
+    private static final int SEND_SMS_ID = 1;  // drag up
+    private static final int DECLINE_CALL_ID = 2;  // drag left
 
     /**
      * Reference to the InCallScreen activity that owns us.  This may be
@@ -84,7 +81,6 @@ public class InCallTouchUi extends FrameLayout
 
     // UI containers / elements
     private GlowPadView mIncomingCallWidget;  // UI used for an incoming call
-    private FrameLayout mIncomingCallWidgetFramelayout;
     private boolean mIncomingCallWidgetIsFadingOut;
     private boolean mIncomingCallWidgetShouldBeReset = true;
 
@@ -101,9 +97,7 @@ public class InCallTouchUi extends FrameLayout
     private CompoundButton mAudioButton;
     private CompoundButton mHoldButton;
     private ImageButton mSwapButton;
-    private ImageButton mAddBlacklistButton;
     private View mHoldSwapSpacer;
-    private View mBlacklistSpacer;
 
     // "Extra button row"
     private ViewStub mExtraButtonRow;
@@ -167,9 +161,6 @@ public class InCallTouchUi extends FrameLayout
         mIncomingCallWidget = (GlowPadView) findViewById(R.id.incomingCallWidget);
         mIncomingCallWidget.setOnTriggerListener(this);
 
-        // Get framelayout for background changes @transparent ui incall screen
-        mIncomingCallWidgetFramelayout = (FrameLayout) findViewById(R.id.incomingCallWidgetFrameLayout);
-
         // Container for the UI elements shown while on a regular call.
         mInCallControls = findViewById(R.id.inCallControls);
 
@@ -199,13 +190,6 @@ public class InCallTouchUi extends FrameLayout
         mSwapButton.setOnClickListener(this);
         mSwapButton.setOnLongClickListener(this);
         mHoldSwapSpacer = mInCallControls.findViewById(R.id.holdSwapSpacer);
-        mBlacklistSpacer = mInCallControls.findViewById(R.id.blacklistSpacer);
-
-        // Blacklist functionality
-        mAddBlacklistButton = (ImageButton) mInCallControls.findViewById(R.id.addBlacklistButton);
-        if (mAddBlacklistButton != null) {
-            mAddBlacklistButton.setOnClickListener(this);
-        }
 
         // TODO: Back when these buttons had text labels, we changed
         // the label of mSwapButton for CDMA as follows:
@@ -415,7 +399,6 @@ public class InCallTouchUi extends FrameLayout
             case R.id.swapButton:
             case R.id.cdmaMergeButton:
             case R.id.manageConferenceButton:
-            case R.id.addBlacklistButton:
                 // Clicks on the regular onscreen buttons get forwarded
                 // straight to the InCallScreen.
                 mInCallScreen.handleOnscreenButtonClick(id);
@@ -557,14 +540,6 @@ public class InCallTouchUi extends FrameLayout
         // "Audio"
         updateAudioButton(inCallControlState);
 
-        // "Add to black list"
-        if (mAddBlacklistButton != null) {
-            boolean visible = BlacklistUtils.isBlacklistEnabled(getContext()) &&
-                    inCallControlState.canBlacklistCall;
-            mAddBlacklistButton.setVisibility(visible ? View.VISIBLE : View.GONE);
-            mBlacklistSpacer.setVisibility(visible ? View.VISIBLE : View.GONE);
-        }
-
         // "Hold" / "Swap":
         // These two buttons occupy the same space onscreen, so at any
         // given point exactly one of them must be VISIBLE and the other
@@ -697,7 +672,6 @@ public class InCallTouchUi extends FrameLayout
         log(" - cdmaMerge: " + getButtonState(mCdmaMergeButton));
         log(" - swap: " + getButtonState(mSwapButton));
         log(" - manageConferenceButton: " + getButtonState(mManageConferenceButton));
-        log(" - addBlacklistButton: " + getButtonState(mAddBlacklistButton));
     }
 
     private static String getButtonState(View view) {
@@ -1029,11 +1003,7 @@ public class InCallTouchUi extends FrameLayout
     @Override
     public void onReleased(View v, int handle) {
 
-    }  
-
-        public void onTargetChange(View v, int whichHandle) {
-
-        }
+    }
 
     /**
      * Handles "Answer" and "Reject" actions for an incoming call.
@@ -1101,14 +1071,6 @@ public class InCallTouchUi extends FrameLayout
             case DECLINE_CALL_ID:
                 if (DBG) log("DECLINE_CALL_ID: reject!");
                 mInCallScreen.handleOnscreenButtonClick(R.id.incomingCallReject);
-
-                // Same as "answer" case.
-                mLastIncomingCallActionTime = SystemClock.uptimeMillis();
-                break;
-
-            case DECLINE_CALL_CALLBACK:
-                if (DBG) log("DECLINE_CALL_CALLBACK!");
-                mInCallScreen.handleOnscreenButtonClick(R.id.incomingCallRejectCallback);
 
                 // Same as "answer" case.
                 mLastIncomingCallActionTime = SystemClock.uptimeMillis();
@@ -1209,47 +1171,36 @@ public class InCallTouchUi extends FrameLayout
         }
         mIncomingCallWidget.setAlpha(1.0f);
 
-        if (mIncomingCallWidgetFramelayout != null) {
-            if (PhoneUtils.PhoneSettings.transparentInCallWidget(this.getContext())) {
-                mIncomingCallWidgetFramelayout.setBackgroundResource(android.R.color.transparent);
-            } else {
-                mIncomingCallWidgetFramelayout.setBackgroundResource(R.color.incall_call_banner_background);
-            }
-        }
-
         // Update the GlowPadView widget's targets based on the state of
         // the ringing call.  (Specifically, we need to disable the
         // "respond via SMS" option for certain types of calls, like SIP
         // addresses or numbers with blocked caller-id.)
-        final boolean showdirectcallback= PhoneUtils.PhoneSettings.isDirectCallBackEnabled(getContext());
-        log("Showing directcallback slide " + new Boolean(showdirectcallback).toString());
         final boolean allowRespondViaSms =
                 RespondViaSmsManager.allowRespondViaSmsForCall(mInCallScreen, ringingCall);
-        final int targetResourceId;
-        final int targetDescription;
-        final int targetDirectionDescription;
-        if (allowRespondViaSms) {
-            if (showdirectcallback) {
-                targetResourceId = R.array.incoming_call_widget_4way_targets;
-                targetDescription = R.array.incoming_call_widget_4way_target_descriptions;
-                targetDirectionDescription = R.array.incoming_call_widget_4way_direction_descriptions;
-            } else {
-                targetResourceId = R.array.incoming_call_widget_3way_targets;
-                targetDescription = R.array.incoming_call_widget_3way_target_descriptions;
-                targetDirectionDescription = R.array.incoming_call_widget_3way_direction_descriptions;
-            }
-        } else {
-            targetResourceId = R.array.incoming_call_widget_2way_targets;
-            targetDescription = R.array.incoming_call_widget_2way_target_descriptions;
-            targetDirectionDescription = R.array.incoming_call_widget_2way_direction_descriptions;
-        }
+        final int targetResourceId = allowRespondViaSms
+                ? R.array.incoming_call_widget_3way_targets
+                : R.array.incoming_call_widget_2way_targets;
         // The widget should be updated only when appropriate; if the previous choice can be reused
         // for this incoming call, we'll just keep using it. Otherwise we'll see UI glitch
         // everytime when this method is called during a single incoming call.
         if (targetResourceId != mIncomingCallWidget.getTargetResourceId()) {
-            mIncomingCallWidget.setTargetResources(targetResourceId);
-            mIncomingCallWidget.setTargetDescriptionsResourceId(targetDescription);
-            mIncomingCallWidget.setDirectionDescriptionsResourceId(targetDirectionDescription);
+            if (allowRespondViaSms) {
+                // The GlowPadView widget is allowed to have all 3 choices:
+                // Answer, Decline, and Respond via SMS.
+                mIncomingCallWidget.setTargetResources(targetResourceId);
+                mIncomingCallWidget.setTargetDescriptionsResourceId(
+                        R.array.incoming_call_widget_3way_target_descriptions);
+                mIncomingCallWidget.setDirectionDescriptionsResourceId(
+                        R.array.incoming_call_widget_3way_direction_descriptions);
+            } else {
+                // You only get two choices: Answer or Decline.
+                mIncomingCallWidget.setTargetResources(targetResourceId);
+                mIncomingCallWidget.setTargetDescriptionsResourceId(
+                        R.array.incoming_call_widget_2way_target_descriptions);
+                mIncomingCallWidget.setDirectionDescriptionsResourceId(
+                        R.array.incoming_call_widget_2way_direction_descriptions);
+            }
+
             // This will be used right after this block.
             mIncomingCallWidgetShouldBeReset = true;
         }

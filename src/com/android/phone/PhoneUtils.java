@@ -1,6 +1,5 @@
 /*
  * Copyright (C) 2006 The Android Open Source Project
- * Blacklist - Copyright (C) 2013 The CyanogenMod Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -25,7 +24,6 @@ import android.content.ActivityNotFoundException;
 import android.content.Context;
 import android.content.DialogInterface;
 import android.content.Intent;
-import android.content.SharedPreferences;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
 import android.content.res.Configuration;
@@ -38,7 +36,6 @@ import android.os.Handler;
 import android.os.Message;
 import android.os.RemoteException;
 import android.os.SystemProperties;
-import android.preference.PreferenceManager;
 import android.provider.Settings;
 import android.telephony.PhoneNumberUtils;
 import android.text.TextUtils;
@@ -64,19 +61,12 @@ import com.android.internal.telephony.TelephonyProperties;
 import com.android.internal.telephony.cdma.CdmaConnection;
 import com.android.internal.telephony.sip.SipPhone;
 
-import java.io.File;
-import java.io.FileNotFoundException;
-import java.io.FileOutputStream;
-import java.io.IOException;
-import java.io.SyncFailedException;
-
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Hashtable;
 import java.util.Iterator;
 import java.util.List;
 
-import android.preference.PreferenceManager;
 /**
  * Misc utilities for the Phone app.
  */
@@ -104,10 +94,6 @@ public class PhoneUtils {
     static final int AUDIO_IDLE = 0;  /** audio behaviour at phone idle */
     static final int AUDIO_RINGING = 1;  /** audio behaviour while ringing */
     static final int AUDIO_OFFHOOK = 2;  /** audio behaviour while in call. */
-
-    // USSD string length for MMI operations
-    static final int MIN_USSD_LEN = 1;
-    static final int MAX_USSD_LEN = 160;
 
     /** Speaker state, persisting between wired headset connection events */
     private static boolean sIsSpeakerEnabled = false;
@@ -244,9 +230,6 @@ public class PhoneUtils {
         boolean answered = false;
         IBluetoothHeadsetPhone btPhone = null;
 
-        // enable noise suppression
-        turnOnNoiseSuppression(app.getApplicationContext(), true);
-
         if (phoneIsCdma) {
             // Stop any signalInfo tone being played when a Call waiting gets answered
             if (ringingCall.getState() == Call.State.WAITING) {
@@ -376,105 +359,6 @@ public class PhoneUtils {
         return hungup;
     }
 
-    static Call getCurrentCall(Phone phone) {
-        Call ringing = phone.getRingingCall();
-        Call fg = phone.getForegroundCall();
-        Call bg = phone.getBackgroundCall();
-        if (!ringing.isIdle()) {
-            return ringing;
-        }
-        if (!fg.isIdle()) {
-            return fg;
-        }
-        if (!bg.isIdle()) {
-            return bg;
-        }
-        return fg;
-    }
-
-    static Connection getConnection(Phone phone, Call call) {
-        if (call == null) {
-            return null;
-        }
-        if (phone.getPhoneType() == PhoneConstants.PHONE_TYPE_CDMA) {
-            return call.getLatestConnection();
-        }
-        return call.getEarliestConnection();
-    }
-
-    static class PhoneSettings {
-        /* vibration preferences */
-        static boolean vibOn60Secs(Context context) {
-            return getPrefs(context).getBoolean("button_vibrate_60", false);
-        }
-        static boolean vibOn45Secs(Context context) {
-            return getPrefs(context).getBoolean("button_vibrate_45", false);
-        }
-        static boolean vibHangup(Context context) {
-            return getPrefs(context).getBoolean("button_vibrate_hangup", false);
-        }
-        static boolean vibOutgoing(Context context) {
-            return getPrefs(context).getBoolean("button_vibrate_outgoing", false);
-        }
-        static boolean vibCallWaiting(Context context) {
-            return getPrefs(context).getBoolean("button_vibrate_call_waiting", false);
-        }
-
-        /* misc. UI and behaviour preferences */
-        static boolean showInCallEvents(Context context) {
-            return getPrefs(context).getBoolean("button_show_ssn_key", false);
-        }
-        static boolean showCallLogAfterCall(Context context) {
-            return getPrefs(context).getBoolean("button_calllog_after_call", false);
-        }
-        static boolean backgroundInCallScreen(Context context) {
-            return getPrefs(context).getBoolean("bg_incall_screen", false);
-        }
-        static int flipAction(Context context) {
-            String s = getPrefs(context).getString("flip_action", "0");
-            return Integer.parseInt(s);
-        }
-        static boolean transparentInCallWidget(Context context) {
-            return getPrefs(context).getBoolean("transparent_in_call_widget", false);
-        }
-        static boolean isDirectCallBackEnabled(Context context) {
-            return getPrefs(context).getBoolean("button_callback", false);
-        }
-        static boolean markRejectedCallsAsMissed(Context context) {
-            return getPrefs(context).getBoolean("button_rejected_as_missed", false);
-        }
-
-        /* voice quality preferences */
-        static String getVoiceQualityParameter(Context context) {
-            String param = context.getResources().getString(R.string.voice_quality_param);
-            if (TextUtils.isEmpty(param)) {
-                return null;
-            }
-            String value = getVoiceQualityValue(context);
-            if (value == null) {
-                return null;
-            }
-            return param + "=" + value;
-        }
-        static String getVoiceQualityValue(Context context) {
-            String value = getPrefs(context).getString(
-                    CallFeaturesSetting.BUTTON_VOICE_QUALITY_KEY, null);
-            if (value != null) {
-                return value;
-            }
-            /* use first value of entry list */
-            String[] values = context.getResources().getStringArray(R.array.voice_quality_values);
-            if (values.length > 0) {
-                return values[0];
-            }
-            return null;
-        }
-
-        private static SharedPreferences getPrefs(Context context) {
-            return PreferenceManager.getDefaultSharedPreferences(context);
-        }
-    }
-
     static boolean hangupRingingCall(Call ringing) {
         if (DBG) log("hangup ringing call");
         int phoneType = ringing.getPhone().getPhoneType();
@@ -562,17 +446,13 @@ public class PhoneUtils {
      */
     static boolean hangup(Call call) {
         try {
-            PhoneGlobals app = PhoneGlobals.getInstance();
-            CallManager cm = app.mCM;
+            CallManager cm = PhoneGlobals.getInstance().mCM;
 
             if (call.getState() == Call.State.ACTIVE && cm.hasActiveBgCall()) {
                 // handle foreground call hangup while there is background call
                 log("- hangup(Call): hangupForegroundResumeBackground...");
                 cm.hangupForegroundResumeBackground(cm.getFirstActiveBgCall());
             } else {
-                // write the phone apps status to proximity sysfs node
-                writePhoneAppStatus(app.getApplicationContext(), false);
-
                 log("- hangup(Call): regular hangup()...");
                 call.hangup();
             }
@@ -1199,21 +1079,7 @@ public class PhoneUtils {
                         public void onClick(DialogInterface dialog, int whichButton) {
                             switch (whichButton) {
                                 case DialogInterface.BUTTON_POSITIVE:
-                                    // As per spec 24.080, valid length of ussd string
-                                    // is 1 - 160. If length is out of the range then
-                                    // display toast message & Cancel MMI operation.
-                                    if (inputText.length() < MIN_USSD_LEN
-                                            || inputText.length() > MAX_USSD_LEN) {
-                                        Toast.makeText(app,
-                                                app.getResources().getString(R.string.enter_input,
-                                                MIN_USSD_LEN, MAX_USSD_LEN),
-                                                Toast.LENGTH_LONG).show();
-                                        if (mmiCode.isCancelable()) {
-                                            mmiCode.cancel();
-                                        }
-                                    } else {
-                                        phone.sendUssdResponse(inputText.getText().toString());
-                                    }
+                                    phone.sendUssdResponse(inputText.getText().toString());
                                     break;
                                 case DialogInterface.BUTTON_NEGATIVE:
                                     if (mmiCode.isCancelable()) {
@@ -1711,11 +1577,7 @@ public class PhoneUtils {
             // return it to the user.
 
             cit = new CallerInfoToken();
-            if (userDataObject instanceof String) { // only blacklist will cause this, so just ignore this.
-                cit.currentInfo = new CallerInfo();
-            } else {
-                cit.currentInfo = (CallerInfo) userDataObject;
-            }
+            cit.currentInfo = (CallerInfo) userDataObject;
             cit.asyncQuery = null;
             cit.isFinal = true;
             // since the query is already done, call the listener.
@@ -1784,6 +1646,7 @@ public class PhoneUtils {
                 conn.setUserData(ci);
             }
         };
+
 
     /**
      * Returns a single "name" for the specified given a CallerInfo object.
@@ -1975,62 +1838,56 @@ public class PhoneUtils {
         return audioManager.isSpeakerphoneOn();
     }
 
-    static void turnOnNoiseSuppression(Context context, boolean flag) {
+
+    static void turnOnNoiseSuppression(Context context, boolean flag, boolean store) {
+        if (DBG) log("turnOnNoiseSuppression: " + flag);
         AudioManager audioManager = (AudioManager) context.getSystemService(Context.AUDIO_SERVICE);
 
         if (!context.getResources().getBoolean(R.bool.has_in_call_noise_suppression)) {
             return;
         }
 
-        if (DBG) log("turnOnNoiseSuppression: " + flag);
-
-        int nsp = android.provider.Settings.System.getInt(context.getContentResolver(),
-                                                              android.provider.Settings.System.NOISE_SUPPRESSION,
-                                                              1);
-
-        String aParam = context.getResources().getString(R.string.in_call_noise_suppression_audioparameter);
-        String[] aPValues = aParam.split("=");
-
-        if(aPValues[0].length() == 0) {
-            aPValues[0] = "noise_suppression";
-        }
-
-        if(aPValues[1].length() == 0) {
-            aPValues[1] = "on";
-        }
-
-        if(aPValues[2].length() == 0) {
-            aPValues[2] = "off";
-        }
-
-        if (nsp == 1 && flag) {
-            if (DBG) log("turnOnNoiseSuppression: " + aPValues[0] + "=" + aPValues[1]);
-            audioManager.setParameters(aPValues[0] + "=" + aPValues[1]);
+        if (flag) {
+            audioManager.setParameters("noise_suppression=auto");
         } else {
-            if (DBG) log("turnOnNoiseSuppression: " + aPValues[0] + "=" + aPValues[2]);
-            audioManager.setParameters(aPValues[0] + "=" + aPValues[2]);
+            audioManager.setParameters("noise_suppression=off");
+        }
+
+        // record the speaker-enable value
+        if (store) {
+            sIsNoiseSuppressionEnabled = flag;
+        }
+
+        // TODO: implement and manage ICON
+
+    }
+
+    static void restoreNoiseSuppression(Context context) {
+        if (DBG) log("restoreNoiseSuppression, restoring to: " + sIsNoiseSuppressionEnabled);
+
+        if (!context.getResources().getBoolean(R.bool.has_in_call_noise_suppression)) {
+            return;
+        }
+
+        // change the mode if needed.
+        if (isNoiseSuppressionOn(context) != sIsNoiseSuppressionEnabled) {
+            turnOnNoiseSuppression(context, sIsNoiseSuppressionEnabled, false);
         }
     }
 
-    static void writePhoneAppStatus(Context context, boolean flag) {
-        String statusFile = context.getResources().getString(R.string.phone_app_status_file);
+    static boolean isNoiseSuppressionOn(Context context) {
 
-        if (statusFile.length() >= 1) {
-            log("writePhoneAppStatus: " + flag);
+        if (!context.getResources().getBoolean(R.bool.has_in_call_noise_suppression)) {
+            return false;
+        }
 
-            String[] statusValues = context.getResources().getStringArray(R.array.phone_app_status_values);
-
-            if (flag) {
-                if (statusValues[0].length() >= 1) {
-                    writeValue(statusFile, statusValues[0]);
-                }
-            } else {
-                if (statusValues[1].length() >= 1) {
-                    writeValue(statusFile, statusValues[1]);
-                }
-            }
+        AudioManager audioManager = (AudioManager) context.getSystemService(Context.AUDIO_SERVICE);
+        String noiseSuppression = audioManager.getParameters("noise_suppression");
+        if (DBG) log("isNoiseSuppressionOn: " + noiseSuppression);
+        if (noiseSuppression.contains("off")) {
+            return false;
         } else {
-            return;
+            return true;
         }
     }
 
@@ -2237,8 +2094,8 @@ public class PhoneUtils {
      */
     /* package */ static boolean hasDisconnectedConnections(Phone phone) {
         return hasDisconnectedConnections(phone.getForegroundCall()) ||
-               hasDisconnectedConnections(phone.getBackgroundCall()) ||
-               hasDisconnectedConnections(phone.getRingingCall());
+                hasDisconnectedConnections(phone.getBackgroundCall()) ||
+                hasDisconnectedConnections(phone.getRingingCall());
     }
 
     /**
@@ -2308,8 +2165,8 @@ public class PhoneUtils {
             // "full".
             // TODO: shall move all okToMerge logic to CallManager
             return !cm.hasActiveRingingCall() && cm.hasActiveFgCall()
-                 && cm.hasActiveBgCall()
-                 && cm.canConference(cm.getFirstActiveBgCall());
+                    && cm.hasActiveBgCall()
+                    && cm.canConference(cm.getFirstActiveBgCall());
         }
     }
 
@@ -2349,8 +2206,8 @@ public class PhoneUtils {
             return !hasRingingCall
                     && !allLinesTaken
                     && ((fgCallState == Call.State.ACTIVE)
-                     || (fgCallState == Call.State.IDLE)
-                     || (fgCallState == Call.State.DISCONNECTED));
+                        || (fgCallState == Call.State.IDLE)
+                        || (fgCallState == Call.State.DISCONNECTED));
         } else {
             throw new IllegalStateException("Unexpected phone type: " + phoneType);
         }
@@ -2592,6 +2449,7 @@ public class PhoneUtils {
         return activated;
     }
 
+
     /**
      * Returns whether the phone is in ECM ("Emergency Callback Mode") or not.
      */
@@ -2633,15 +2491,6 @@ public class PhoneUtils {
             if (phone != null) return phone;
         }
         return cm.getDefaultPhone();
-    }
-
-    public static Phone getGsmPhone(CallManager cm) {
-        for (Phone phone: cm.getAllPhones()) {
-            if (phone.getPhoneType() == PhoneConstants.PHONE_TYPE_GSM) {
-                return phone;
-            }
-        }
-        return null;
     }
 
     public static Phone getSipPhoneFromUri(CallManager cm, String target) {
@@ -2742,6 +2591,7 @@ public class PhoneUtils {
         b.append(" hasConnections ").append(call.hasConnections());
         Log.d(LOG_TAG, b.toString());
 
+
         final boolean hasRingingCall = !phone.getRingingCall().isIdle();
         final boolean hasActiveCall = !phone.getForegroundCall().isIdle();
         final boolean hasHoldingCall = !phone.getBackgroundCall().isIdle();
@@ -2779,6 +2629,8 @@ public class PhoneUtils {
         CallManager cm = PhoneGlobals.getInstance().mCM;
         StringBuilder b = new StringBuilder(128);
 
+
+
         Log.d(LOG_TAG, "############### dumpCallManager() ##############");
         // TODO: Don't log "cm" itself, since CallManager.toString()
         // already spews out almost all this same information.
@@ -2807,6 +2659,8 @@ public class PhoneUtils {
         b.append(call);
         b.append( "  State: ").append(cm.getFirstActiveRingingCall().getState());
         Log.d(LOG_TAG, b.toString());
+
+
 
         for (Phone phone : CallManager.getInstance().getAllPhones()) {
             if (phone != null) {
@@ -2841,39 +2695,5 @@ public class PhoneUtils {
     public static boolean isLandscape(Context context) {
         return context.getResources().getConfiguration().orientation
                 == Configuration.ORIENTATION_LANDSCAPE;
-    }
-
-    /**
-     * Write a string value to the specified file.
-     *
-     * @param filename The filename
-     * @param value The value
-     */
-    public static void writeValue(String filename, String value) {
-        FileOutputStream fos = null;
-        try {
-            fos = new FileOutputStream(new File(filename), false);
-            fos.write(value.getBytes());
-            fos.flush();
-        } catch (FileNotFoundException ex) {
-            Log.w(LOG_TAG, "file " + filename + " not found: " + ex);
-        } catch (SyncFailedException ex) {
-            Log.w(LOG_TAG, "file " + filename + " sync failed: " + ex);
-        } catch (IOException ex) {
-            Log.w(LOG_TAG, "IOException trying to sync " + filename + ": " + ex);
-        } catch (RuntimeException ex) {
-            Log.w(LOG_TAG, "exception while syncing file: ", ex);
-        } finally {
-            if (fos != null) {
-                try {
-                    Log.w(LOG_TAG, "file " + filename + ": " + value);
-                    fos.close();
-                } catch (IOException ex) {
-                    Log.w(LOG_TAG, "IOException while closing synced file: ", ex);
-                } catch (RuntimeException ex) {
-                    Log.w(LOG_TAG, "exception while closing file: ", ex);
-                }
-            }
-        }
     }
 }

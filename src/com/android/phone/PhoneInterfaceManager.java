@@ -27,17 +27,14 @@ import android.os.AsyncResult;
 import android.os.Binder;
 import android.os.Bundle;
 import android.os.Handler;
-import android.provider.Settings;
 import android.os.Looper;
 import android.os.Message;
 import android.os.Process;
 import android.os.ServiceManager;
-import android.os.SystemProperties;
 import android.os.UserHandle;
 import android.telephony.NeighboringCellInfo;
 import android.telephony.CellInfo;
 import android.telephony.ServiceState;
-import android.telephony.TelephonyManager;
 import android.text.TextUtils;
 import android.util.Log;
 
@@ -47,12 +44,9 @@ import com.android.internal.telephony.ITelephony;
 import com.android.internal.telephony.Phone;
 import com.android.internal.telephony.CallManager;
 import com.android.internal.telephony.PhoneConstants;
-import com.android.internal.telephony.RILConstants;
 
 import java.util.List;
 import java.util.ArrayList;
-
-import com.android.phone.R;
 
 /**
  * Implementation of the ITelephony interface.
@@ -70,7 +64,6 @@ public class PhoneInterfaceManager extends ITelephony.Stub {
     private static final int CMD_END_CALL = 5;  // not used yet
     private static final int CMD_SILENCE_RINGER = 6;
     private static final int CMD_TOGGLE_LTE = 7; // not used yet
-    private static final int CMD_TOGGLE_2G = 8;
 
     /** The singleton instance. */
     private static PhoneInterfaceManager sInstance;
@@ -300,45 +293,25 @@ public class PhoneInterfaceManager extends ITelephony.Stub {
         mApp.startActivity(intent);
     }
 
-    public void toggle2G(boolean on) {
-        int network = -1;
-        if (on) {
-            network = Phone.NT_MODE_GSM_ONLY;
-        } else {
-            network = Phone.NT_MODE_WCDMA_PREF;
-        }
-        mPhone.setPreferredNetworkType(network,
-                mMainThreadHandler.obtainMessage(CMD_TOGGLE_2G));
-        Settings.Secure.putInt(mApp.getContentResolver(),
-                Settings.Global.PREFERRED_NETWORK_MODE, network);
-    }
-
     public void toggleLTE(boolean on) {
         int network = -1;
-        boolean usesQcLte = SystemProperties.getBoolean(
-                        "ro.config.qc_lte_network_modes", false);
-
-        if (getLteOnGsmMode() != 0) {
-            if (on) {
-                network = Phone.NT_MODE_LTE_GSM_WCDMA;
-            } else {
-                network = Phone.NT_MODE_WCDMA_PREF;
-            }
-        } else if (usesQcLte) {
-            if (on) {
-                network = RILConstants.NETWORK_MODE_LTE_CDMA_EVDO;
-            } else {
-                network = Phone.NT_MODE_CDMA;
-            }
-        } else {
+        if (getLteOnCdmaMode() == PhoneConstants.LTE_ON_CDMA_TRUE) {
             if (on) {
                 if ((network = mApp.getResources().getInteger(R.integer.toggleLTE_lte_cdma_nt_mode)) == -1)
                     network = Phone.NT_MODE_GLOBAL;
             } else {
                 network = Phone.NT_MODE_CDMA;
             }
+        } else if (getLteOnGsmMode() != 0) {
+            if (on) {
+                network = Phone.NT_MODE_LTE_GSM_WCDMA;
+            } else {
+                network = Phone.NT_MODE_WCDMA_PREF;
+            }
+        } else {
+            // Not an LTE device.
+            return;
         }
-
         mPhone.setPreferredNetworkType(network,
                 mMainThreadHandler.obtainMessage(CMD_TOGGLE_LTE));
         android.provider.Settings.Global.putInt(mApp.getContentResolver(),

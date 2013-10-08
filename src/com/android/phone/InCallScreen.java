@@ -36,10 +36,6 @@ import android.content.IntentFilter;
 import android.content.res.Configuration;
 import android.content.res.Resources;
 import android.graphics.Typeface;
-import android.hardware.Sensor;
-import android.hardware.SensorEvent;
-import android.hardware.SensorEventListener;
-import android.hardware.SensorManager;
 import android.media.AudioManager;
 import android.os.AsyncResult;
 import android.os.Bundle;
@@ -69,19 +65,17 @@ import android.widget.Toast;
 
 import com.android.internal.telephony.Call;
 import com.android.internal.telephony.CallManager;
-import com.android.internal.telephony.CallStateException;
 import com.android.internal.telephony.Connection;
 import com.android.internal.telephony.MmiCode;
 import com.android.internal.telephony.Phone;
 import com.android.internal.telephony.PhoneConstants;
 import com.android.internal.telephony.TelephonyCapabilities;
-import com.android.internal.telephony.gsm.SuppServiceNotification;
-import com.android.internal.telephony.util.BlacklistUtils;
 import com.android.phone.Constants.CallStatusCode;
 import com.android.phone.InCallUiState.InCallScreenMode;
 import com.android.phone.OtaUtils.CdmaOtaScreenState;
 
 import java.util.List;
+
 
 /**
  * Phone app "in call" screen.
@@ -168,98 +162,12 @@ public class InCallScreen extends Activity
     private static final int REQUEST_UPDATE_SCREEN = 122;
     private static final int PHONE_INCOMING_RING = 123;
     private static final int PHONE_NEW_RINGING_CONNECTION = 124;
-    private static final int SUPP_SERVICE_NOTIFY = 125;
 
     // When InCallScreenMode is UNDEFINED set the default action
     // to ACTION_UNDEFINED so if we are resumed the activity will
     // know its undefined. In particular checkIsOtaCall will return
     // false.
     public static final String ACTION_UNDEFINED = "com.android.phone.InCallScreen.UNDEFINED";
-
-    // Flip action IDs
-    private static final int RINGING_NO_ACTION = 0;
-    private static final int MUTE_RINGER = 1;
-    private static final int DISMISS_CALL = 2;
-
-    private interface ResettableSensorEventListener extends SensorEventListener {
-        public void reset();
-    }
-
-    private int mFlipAction;
-
-    private final ResettableSensorEventListener mFlipListener = new ResettableSensorEventListener() {
-        // Our accelerometers are not quite accurate.
-        private static final int FACE_UP_GRAVITY_THRESHOLD = 7;
-        private static final int FACE_DOWN_GRAVITY_THRESHOLD = -7;
-        private static final int TILT_THRESHOLD = 3;
-        private static final int SENSOR_SAMPLES = 3;
-        private static final int MIN_ACCEPT_COUNT = SENSOR_SAMPLES - 1;
-
-        private boolean mStopped;
-        private boolean mWasFaceUp;
-        private boolean[] mSamples = new boolean[SENSOR_SAMPLES];
-        private int mSampleIndex;
-
-        @Override
-        public void onAccuracyChanged(Sensor sensor, int acc) {
-        }
-
-        @Override
-
-        public void reset() {
-            mWasFaceUp = false;
-            mStopped = false;
-            for (int i = 0; i < SENSOR_SAMPLES; i++) {
-                mSamples[i] = false;
-            }
-        }
-
-        private boolean filterSamples() {
-            int trues = 0;
-            for (boolean sample : mSamples) {
-                if(sample) {
-                    ++trues;
-                }
-            }
-            return trues >= MIN_ACCEPT_COUNT;
-        }
-
-        @Override
-        public void onSensorChanged(SensorEvent event) {
-            // Add a sample overwriting the oldest one. Several samples
-            // are used to avoid the erroneous values the sensor sometimes
-            // returns.
-            float z = event.values[2];
-
-            if (mStopped) {
-                return;
-            }
-
-            if (!mWasFaceUp) {
-                // Check if its face up enough.
-                mSamples[mSampleIndex] = z > FACE_UP_GRAVITY_THRESHOLD;
-
-                // face up
-                if (filterSamples()) {
-                    mWasFaceUp = true;
-                    for (int i = 0; i < SENSOR_SAMPLES; i++) {
-                        mSamples[i] = false;
-                    }
-                }
-            } else {
-                // Check if its face down enough.
-                mSamples[mSampleIndex] = z < FACE_DOWN_GRAVITY_THRESHOLD;
-
-                // face down
-                if (filterSamples()) {
-                    mStopped = true;
-                    handleAction(mFlipAction);
-                }
-            }
-
-            mSampleIndex = ((mSampleIndex + 1) % SENSOR_SAMPLES);
-        }
-    };
 
     /** Status codes returned from syncWithPhoneState(). */
     private enum SyncWithPhoneStateStatus {
@@ -353,6 +261,7 @@ public class InCallScreen extends Activity
         EARPIECE,   // Handset earpiece (or wired headset, if connected)
     }
 
+
     private Handler mHandler = new Handler() {
         @Override
         public void handleMessage(Message msg) {
@@ -372,10 +281,6 @@ public class InCallScreen extends Activity
             switch (msg.what) {
                 case SUPP_SERVICE_FAILED:
                     onSuppServiceFailed((AsyncResult) msg.obj);
-                    break;
-
-                case SUPP_SERVICE_NOTIFY:
-                    onSuppServiceNotification((AsyncResult) msg.obj);
                     break;
 
                 case PHONE_STATE_CHANGED:
@@ -526,6 +431,7 @@ public class InCallScreen extends Activity
             }
         };
 
+
     @Override
     protected void onCreate(Bundle icicle) {
         Log.i(LOG_TAG, "onCreate()...  this = " + this);
@@ -577,7 +483,7 @@ public class InCallScreen extends Activity
         mBluetoothAdapter = BluetoothAdapter.getDefaultAdapter();
         if (mBluetoothAdapter != null) {
             mBluetoothAdapter.getProfileProxy(getApplicationContext(), mBluetoothProfileServiceListener,
-                BluetoothProfile.HEADSET);
+                                    BluetoothProfile.HEADSET);
         }
 
         requestWindowFeature(Window.FEATURE_NO_TITLE);
@@ -643,8 +549,6 @@ public class InCallScreen extends Activity
     protected void onResume() {
         if (DBG) log("onResume()...");
         super.onResume();
-
-        mFlipAction = PhoneUtils.PhoneSettings.flipAction(this);
 
         mIsForegroundActivity = true;
         mIsForegroundActivityForProximity = true;
@@ -869,7 +773,6 @@ public class InCallScreen extends Activity
     protected void onPause() {
         if (DBG) log("onPause()...");
         super.onPause();
-        detachListeners();
 
         if (mPowerManager.isScreenOn()) {
             // Set to false when the screen went background *not* by screen turned off. Probably
@@ -1052,45 +955,6 @@ public class InCallScreen extends Activity
         }
     }
 
-    private void attachListeners() {
-        final SensorManager sm = getSensorManager();
-
-        if (mFlipAction != RINGING_NO_ACTION) {
-            mFlipListener.reset();
-            sm.registerListener(mFlipListener,
-                sm.getDefaultSensor(Sensor.TYPE_ACCELEROMETER),
-                SensorManager.SENSOR_DELAY_NORMAL);
-        }
-    }
-
-    private SensorManager getSensorManager() {
-        return (SensorManager) getSystemService(Context.SENSOR_SERVICE);
-    }
-
-    private void detachListeners() {
-        final SensorManager sm = getSensorManager();
-
-        if (mFlipAction != RINGING_NO_ACTION) {
-            sm.unregisterListener(mFlipListener);
-        }
-    }
-
-    private void handleAction(int action) {
-        switch(action) {
-            case MUTE_RINGER:
-                internalSilenceRinger();
-                break;
-            case DISMISS_CALL:
-                internalHangup();
-                break;
-            case RINGING_NO_ACTION:
-            default:
-                //no action
-                break;
-        }
-        detachListeners();
-    }
-
     /**
      * Dismisses the in-call screen.
      *
@@ -1201,7 +1065,6 @@ public class InCallScreen extends Activity
             mCM.registerForSuppServiceFailed(mHandler, SUPP_SERVICE_FAILED, null);
             mCM.registerForIncomingRing(mHandler, PHONE_INCOMING_RING, null);
             mCM.registerForNewRingingConnection(mHandler, PHONE_NEW_RINGING_CONNECTION, null);
-            mCM.registerForSuppServiceNotification(mHandler, SUPP_SERVICE_NOTIFY, null);
             mRegisteredForPhoneStates = true;
         }
     }
@@ -1216,7 +1079,6 @@ public class InCallScreen extends Activity
         mCM.unregisterForSuppServiceFailed(mHandler);
         mCM.unregisterForIncomingRing(mHandler);
         mCM.unregisterForNewRingingConnection(mHandler);
-        mCM.unregisterForSuppServiceNotification(mHandler);
         mRegisteredForPhoneStates = false;
     }
 
@@ -1760,18 +1622,6 @@ public class InCallScreen extends Activity
         mSuppServiceFailureDialog.show();
     }
 
-    private void onSuppServiceNotification(AsyncResult r) {
-        SuppServiceNotification notification = (SuppServiceNotification) r.result;
-
-        if (notification.notificationType == SuppServiceNotification.NOTIFICATION_TYPE_MT) {
-            if (notification.code == SuppServiceNotification.MT_CODE_ADDITIONAL_CALL_FORWARDED) {
-                if (!PhoneUtils.getCurrentCall(mPhone).isIdle()) {
-                    mApp.inCallUiState.needToShowAdditionalCallForwardedDialog = true;
-                }
-            }
-        }
-    }
-
     /**
      * Something has changed in the phone's state.  Update the UI.
      */
@@ -1858,12 +1708,7 @@ public class InCallScreen extends Activity
         // Under certain call disconnected states, we want to alert the user
         // with a dialog instead of going through the normal disconnect
         // routine.
-        if (cause == Connection.DisconnectCause.INCOMING_MISSED) {
-            if (mApp.inCallUiState.needToShowAdditionalCallForwardedDialog) {
-                showGenericErrorDialog(R.string.callUnanswered_forwarded, false);
-                mApp.inCallUiState.needToShowAdditionalCallForwardedDialog = false;
-            }
-        } else if (cause == Connection.DisconnectCause.CALL_BARRED) {
+        if (cause == Connection.DisconnectCause.CALL_BARRED) {
             showGenericErrorDialog(R.string.callFailed_cb_enabled, false);
             return;
         } else if (cause == Connection.DisconnectCause.FDN_BLOCKED) {
@@ -2046,6 +1891,7 @@ public class InCallScreen extends Activity
             }
 
             // Updating the screen wake state is done in onPhoneStateChanged().
+
 
             // CDMA: We only clean up if the Phone state is IDLE as we might receive an
             // onDisconnect for a Call Collision case (rare but possible).
@@ -2519,8 +2365,6 @@ public class InCallScreen extends Activity
         // closed.  (We do this to make sure we're not covering up the
         // "incoming call" UI.)
         if (mCM.getState() == PhoneConstants.State.RINGING) {
-            //If we're ringing, attach flip listener
-            attachListeners();
             if (mDialer.isOpened()) {
               Log.i(LOG_TAG, "During RINGING state we force hiding dialpad.");
               closeDialpadInternal(false);  // don't do the "closing" animation
@@ -2543,6 +2387,7 @@ public class InCallScreen extends Activity
             // call-to-callstate mapping before we can fix this.
             mDialer.clearDigits();
         }
+
 
         // Now that we're sure DTMF dialpad is in an appropriate state, reflect
         // the dialpad state into CallCard
@@ -2649,6 +2494,8 @@ public class InCallScreen extends Activity
         Log.i(LOG_TAG, "syncWithPhoneState: phone is idle (shouldn't be here)");
         return SyncWithPhoneStateStatus.PHONE_NOT_IN_USE;
     }
+
+
 
     private void handleMissingVoiceMailNumber() {
         if (DBG) log("handleMissingVoiceMailNumber");
@@ -2797,7 +2644,6 @@ public class InCallScreen extends Activity
 
                 if ((mLastDisconnectCause != Connection.DisconnectCause.INCOMING_MISSED)
                         && (mLastDisconnectCause != Connection.DisconnectCause.INCOMING_REJECTED)
-                        && PhoneUtils.PhoneSettings.showCallLogAfterCall(this)
                         && !isPhoneStateRestricted()
                         && PhoneGlobals.sVoiceCapable) {
                     final Intent intent = mApp.createPhoneEndIntentUsingCallOrigin();
@@ -2833,31 +2679,6 @@ public class InCallScreen extends Activity
         }
     }
 
-    /**
-     *  Pop up a dialog confirming adding the current number to the blacklist
-     */
-    private void confirmAddBlacklist() {
-        Connection c = PhoneUtils.getConnection(mPhone, PhoneUtils.getCurrentCall(mPhone));
-        if (c == null) {
-            return;
-        }
-        final String number = c.getAddress();
-
-        // Show dialog
-        final String message = getString(R.string.add_to_blacklist_message, number);
-        new AlertDialog.Builder(this)
-                .setTitle(R.string.add_to_blacklist)
-                .setMessage(message)
-                .setPositiveButton(R.string.alert_dialog_yes, new DialogInterface.OnClickListener() {
-                    public void onClick(DialogInterface dialog, int whichButton) {
-                        BlacklistUtils.addOrUpdate(getApplicationContext(), number,
-                                BlacklistUtils.BLOCK_CALLS, BlacklistUtils.BLOCK_CALLS);
-                        internalHangup();
-                    }
-                })
-                .setNegativeButton(R.string.alert_dialog_no, null)
-                .show();
-    }
 
     /**
      * View.OnClickListener implementation.
@@ -3140,9 +2961,6 @@ public class InCallScreen extends Activity
             case R.id.incomingCallRespondViaSms:
                 internalRespondViaSms();
                 break;
-            case R.id.incomingCallRejectCallback:
-                hangupAndCallBack();
-                break;
 
             // The other regular (single-tap) buttons used while in-call:
             case R.id.holdButton:
@@ -3171,9 +2989,6 @@ public class InCallScreen extends Activity
                 // Show the Manage Conference panel.
                 setInCallScreenMode(InCallScreenMode.MANAGE_CONFERENCE);
                 requestUpdateScreen();
-                break;
-            case R.id.addBlacklistButton:
-                confirmAddBlacklist();
                 break;
 
             default:
@@ -3629,6 +3444,7 @@ public class InCallScreen extends Activity
         }
     }
 
+
     //
     // Helper functions for answering incoming calls.
     //
@@ -3644,7 +3460,6 @@ public class InCallScreen extends Activity
         final boolean hasRingingCall = mCM.hasActiveRingingCall();
 
         if (hasRingingCall) {
-            detachListeners();
             Phone phone = mCM.getRingingPhone();
             Call ringing = mCM.getFirstActiveRingingCall();
             int phoneType = phone.getPhoneType();
@@ -3705,7 +3520,7 @@ public class InCallScreen extends Activity
                 } else {
                     if (DBG) log("internalAnswerCall: answering...");
                     PhoneUtils.answerCall(ringing);  // Automatically holds the current active call,
-                                                     // if there is one
+                                                    // if there is one
                 }
             } else {
                 throw new IllegalStateException("Unexpected phone type: " + phoneType);
@@ -3725,30 +3540,6 @@ public class InCallScreen extends Activity
         // In the rare case when multiple calls are ringing, the UI policy
         // it to always act on the first ringing call.
         PhoneUtils.hangupRingingCall(mCM.getFirstActiveRingingCall());
-        detachListeners();
-    }
-
-    private void hangupAndCallBack() {
-        Call call = mCM.getFirstActiveRingingCall();
-        PhoneUtils.hangupRingingCall(call);
-        Connection c = call.getLatestConnection();
-
-        if (VDBG) {
-            log("- connection: " + c);
-        }
-
-        if (c == null) {
-            return;
-        }
-
-        String phoneNumber = c.getAddress();
-        final Phone phone = call.getPhone();
-
-        try {
-            mCM.dial(phone, phoneNumber);
-        } catch (CallStateException e) {
-            log("Failed to make call ");
-        }
     }
 
     /**
@@ -4664,6 +4455,7 @@ public class InCallScreen extends Activity
             // arrow visible for some extra time also...)
         }
     }
+
 
     /**
      * Used when we need to update buttons outside InCallTouchUi's updateInCallControls() along
