@@ -46,6 +46,7 @@ import android.widget.Toast;
 
 import com.android.internal.telephony.Call;
 import com.android.internal.telephony.CallManager;
+import com.android.internal.telephony.Connection;
 import com.android.internal.telephony.Phone;
 import com.android.internal.telephony.PhoneConstants;
 import com.android.internal.widget.multiwaveview.GlowPadView;
@@ -1004,6 +1005,10 @@ public class InCallTouchUi extends FrameLayout
     public void onReleased(View v, int handle) {
 
     }
+
+        public void onTargetChange(View v, int whichHandle) {
+
+        }
 
     /**
      * Handles "Answer" and "Reject" actions for an incoming call.
